@@ -1,0 +1,4 @@
+# scratch: raw Flow renders, QA frames, prompt drafts
+work/
+*.log
+.DS_Store
