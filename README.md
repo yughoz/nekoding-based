@@ -23,3 +23,42 @@ python3 -m http.server 8923
 
 Semua teks section ada di object `sections` dalam `index.html`
 (`eyebrow`, `title`, `body`, `tags`, `cta`). Warna per-section via `accent`.
+
+## Deploy
+
+Situs ini **statis murni — tidak perlu build step** (tanpa Node, tanpa
+bundler). Yang ada di repo sudah bentuk finalnya. Satu-satunya syarat:
+file harus di-serve lewat HTTP, bukan dibuka via `file://`.
+
+### 1. VPS sendiri (nginx / Apache)
+
+```bash
+rsync -avz --exclude work/ --exclude .git \
+  scroll-world/ user@server:/var/www/nekoding-based/
+```
+
+Server block nginx:
+
+```nginx
+server {
+    listen 80;
+    server_name based.nekoding.xyz;
+    root /var/www/nekoding-based;
+    index index.html;
+}
+```
+
+### 2. Netlify / Vercel / Cloudflare Pages
+
+Drag-and-drop folder ini ke Netlify Drop, atau connect repo ini.
+Build command: **(kosong)** · Output directory: `/` (root).
+
+### 3. GitHub Pages
+
+Settings → Pages → Source: `main` / root →
+live di `https://yughoz.github.io/nekoding-based/`.
+
+> Tips: aktifkan gzip/brotli untuk `.html`/`.js`, tapi **jangan**
+> kompres ulang `.mp4` (sudah h264). Total video ~49MB — kalau target
+> pengunjung internasional, taruh Cloudflare di depan VPS.
+
