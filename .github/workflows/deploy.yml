@@ -22,7 +22,7 @@ jobs:
           HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           printf '%s\n' "$KNOWN_HOSTS" > /tmp/kh
-          printf '%s' "$SSH_KEY" > /tmp/id_ed25519
+          printf '%s' "$SSH_KEY" | base64 -d > /tmp/id_ed25519
           chmod 600 /tmp/id_ed25519
           rsync -az --delete \
             -e "ssh -i /tmp/id_ed25519 -o UserKnownHostsFile=/tmp/kh -o StrictHostKeyChecking=yes" \
