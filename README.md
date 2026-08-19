@@ -8,7 +8,9 @@ Flow (Veo), dirakit dengan scrub engine vanilla-JS.
 ## Struktur
 
 - `index.html` — halaman + config section (copy, warna, pacing)
-- `scrub-engine.js` — engine scroll-scrub (dari scroll-world, tanpa modifikasi)
+- `scrub-engine.js` — engine scroll-scrub (dari scroll-world, dengan modifikasi
+  lokal: loading indicator "paw loader" saat klip masih downloading — label
+  via `config.loaderLabel`)
 - `assets/` — poster webp + video mp4 (desktop & varian mobile)
 - `work/` *(tidak di-push)* — pipeline lokal: prompt, render mentah, frame QA
 

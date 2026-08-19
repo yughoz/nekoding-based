@@ -133,7 +133,18 @@ function mountScrollWorld(container, config) {
   hint.appendChild(el('i'));
   const track = el('div', 'sw-track');
 
-  [sky, scrollbar, topbar, stage, copylayer, route, hint, track].forEach(n => container.appendChild(n));
+  // Loading indicator: shown while the current segment's clip is still
+  // downloading (blob fetch is whole-file before the video can scrub).
+  // Labelled via config.loaderLabel; paws animate a walking rhythm.
+  const loader = el('div', 'sw-loader');
+  const loaderText = el('span', 'sw-loader__label');
+  loaderText.textContent = config.loaderLabel || 'loading';
+  loader.appendChild(loaderText);
+  const paws = el('div', 'sw-loader__paws');
+  for (let k = 0; k < 3; k++) paws.appendChild(el('i'));
+  loader.appendChild(paws);
+
+  [sky, scrollbar, topbar, stage, copylayer, route, hint, loader, track].forEach(n => container.appendChild(n));
 
   // segment scenes
   SEGMENTS.forEach(s => {
@@ -266,6 +277,10 @@ function mountScrollWorld(container, config) {
     }
     scrollbarFill.style.transform = `scaleX(${clamp(y / (totalW * vh))})`;
     hint.style.opacity = clamp(1 - y / (0.5 * vh));
+    // Paw loader: on while the segment under the viewport is mid-download.
+    // (loading = fetch in flight; hasClip = blob ok, waiting to paint.)
+    const pending = !reduce && cur.clip && !cur.ready && (cur.loading || cur.hasClip);
+    loader.classList.toggle('is-on', !!pending);
     if (particles) particles.style.transform = `translate3d(0, ${-y * 0.05}px, 0)`;
     ticking = false;
   }
@@ -409,6 +424,17 @@ function injectCSS() {
   .sw-hint i{width:22px;height:34px;border-radius:12px;border:2px solid color-mix(in srgb,var(--sw-ink) 28%,transparent);position:relative;}
   .sw-hint i::after{content:"";position:absolute;left:50%;top:7px;width:4px;height:7px;border-radius:2px;background:var(--sw-accent);transform:translateX(-50%);animation:sw-wheel 1.7s ease-in-out infinite;}
   @keyframes sw-wheel{0%{opacity:0;top:6px}40%{opacity:1}100%{opacity:0;top:17px}}
+  .sw-loader{position:fixed;left:50%;bottom:64px;z-index:30;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s;pointer-events:none;}
+  .sw-loader.is-on{opacity:1;visibility:visible;}
+  .sw-loader__label{font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--sw-ink-soft);}
+  .sw-loader__paws{display:flex;gap:13px;height:18px;}
+  .sw-loader__paws i{position:relative;width:16px;height:18px;opacity:.22;animation:sw-paw 1.15s ease-in-out infinite;}
+  .sw-loader__paws i:nth-child(2){transform:rotate(10deg);}
+  .sw-loader__paws i:nth-child(3){transform:rotate(-8deg);}
+  .sw-loader__paws i:nth-child(2){animation-delay:.16s;} .sw-loader__paws i:nth-child(3){animation-delay:.32s;}
+  .sw-loader__paws i::before{content:"";position:absolute;left:3px;bottom:1px;width:11px;height:8px;background:var(--sw-accent);border-radius:55% 55% 48% 48%;}
+  .sw-loader__paws i::after{content:"";position:absolute;left:1px;top:0;width:5px;height:5px;background:var(--sw-accent);border-radius:50%;box-shadow:6px -1px 0 var(--sw-accent),12px 0 0 var(--sw-accent);}
+  @keyframes sw-paw{0%,100%{opacity:.22}35%{opacity:1}}
   .sw-track{position:relative;z-index:1;width:100%;pointer-events:none;}
   @media (max-width:860px){
     .sw-nav{display:none;}
