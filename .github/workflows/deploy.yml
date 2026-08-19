@@ -1,0 +1,30 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-nekoding
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy static site
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          printf '%s\n' "$KNOWN_HOSTS" > /tmp/kh
+          printf '%s' "$SSH_KEY" > /tmp/id_ed25519
+          chmod 600 /tmp/id_ed25519
+          rsync -az --delete \
+            -e "ssh -i /tmp/id_ed25519 -o UserKnownHostsFile=/tmp/kh -o StrictHostKeyChecking=yes" \
+            index.html scrub-engine.js assets \
+            "root@$HOST:/var/www/nekoding.xyz/"
