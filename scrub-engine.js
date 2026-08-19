@@ -253,16 +253,29 @@ function mountScrollWorld(container, config) {
     }
 
     for (let i = 0; i < N; i++) {
+      // Copy crossfade-replace: each section's copy fades out only while the
+      // next section's copy fades in over it (same spot, roll motion), so the
+      // text never fully disappears at a seam. CW = half the blend width as a
+      // fraction of one segment; at the boundary both copies sit at 0.5.
       const seg = SECTIONS[i]._seg;
-      const pr = clamp((y - seg.start) / (seg.end - seg.start), 0, 1);
-      const before = y < seg.start, after = y > seg.end;
-      let cop;
-      if (i === 0) cop = after ? 0 : smooth(1 - pr / 0.62);            // greets on landing
-      else if (i === N - 1) cop = before ? 0 : smooth(pr / 0.4);       // holds CTA at the end
-      else cop = (before || after) ? 0 : smooth(1 - Math.abs(pr - 0.5) / 0.5);
+      const len = seg.end - seg.start;
+      const CW = 0.45;
+      const tIn = clamp((y - (seg.start - CW * len)) / (2 * CW * len), 0, 1);
+      const tOut = clamp((y - (seg.end - CW * len)) / (2 * CW * len), 0, 1);
+      let cop, drift;
+      if (i === 0) {            // greets on landing, rolls up at the first seam
+        cop = 1 - smooth(tOut);
+        drift = -3 * smooth(tOut);
+      } else if (i === N - 1) { // rolls in from below, then holds through the end
+        cop = smooth(tIn);
+        drift = 3 * (1 - smooth(tIn));
+      } else {
+        cop = smooth(tIn) * (1 - smooth(tOut));
+        drift = 3 * ((1 - smooth(tIn)) - smooth(tOut));
+      }
       const c = copies[i];
       c.style.opacity = cop;
-      c.style.transform = reduce ? 'none' : `translateY(${(0.5 - pr) * 4}vh)`;
+      c.style.transform = reduce ? 'none' : `translateY(${drift.toFixed(3)}vh)`;
       c.style.pointerEvents = cop > 0.5 ? 'auto' : 'none';
     }
 
