@@ -48,6 +48,15 @@
      Nothing here is required — a config with only `clip`/`connectors` still works on
      phones; the mobile variants just make it lighter and smoother.
 
+   BOOT LOADER
+     Clips scrub from whole-file blobs, so a clip that is still downloading cannot
+     animate — scrolling into it just shows a frozen still. Before the page unlocks,
+     a full-screen loader (labelled via config.loaderLabel) downloads every clip +
+     still for this device with a byte-accurate progress bar, then lifts to reveal
+     the flight. Scroll is locked while it's up. A 45s safety timeout lifts it
+     regardless; anything still missing falls back to the lazy per-segment loader
+     (the paw indicator at the bottom).
+
    THEME (CSS custom properties; set on the container or :root to override)
      --sw-bg         page background (match your scene bg for seamless posters)
      --sw-ink        primary text
@@ -206,28 +215,32 @@ function mountScrollWorld(container, config) {
     window.scrollTo({ top: seg.start + (seg.end - seg.start) * 0.5, behavior: reduce ? 'auto' : 'smooth' });
   }
 
+  function attachClip(s, blob) {
+    const v = document.createElement('video');
+    v.className = 'sw-scene__video';
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
+    v.src = URL.createObjectURL(blob);
+    v.addEventListener('loadedmetadata', () => { s.ready = true; read(); });
+    // Reveal the video (hide the still poster) only once a real frame has
+    // painted — on iOS a seeked-but-never-played muted video stays blank, so
+    // hiding the still on metadata alone would flash an empty scene.
+    v.addEventListener('seeked', () => { s.el.classList.add('has-clip'); }, { once: true });
+    v.addEventListener('loadeddata', () => { try { v.pause(); } catch (e) {} if (userReady) primeVideo(v); });
+    s.el.appendChild(v); s.video = v; s.hasClip = true;
+  }
+
   function loadClip(s) {
     // Under prefers-reduced-motion we never load the clips at all — the stills stay up
     // and simply cross-dissolve as you scroll. No scrubbed video motion, no decode cost.
-    if (reduce || s.loading || !s.clip) return;
+    if (reduce || s.hasClip || s.loading || !s.clip) return;
+    if (s.blob) { attachClip(s, s.blob); return; }   // preloaded by the boot screen
     s.loading = true;
     // Serve the lighter mobile encode on phones when one was provided.
     const url = (isMobile() && s.clipM) ? s.clipM : s.clip;
-    fetch(url).then(r => r.ok ? r.blob() : Promise.reject(new Error('404')))
-      .then(blob => {
-        const v = document.createElement('video');
-        v.className = 'sw-scene__video';
-        v.muted = true; v.playsInline = true; v.preload = 'auto';
-        v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
-        v.src = URL.createObjectURL(blob);
-        v.addEventListener('loadedmetadata', () => { s.ready = true; read(); });
-        // Reveal the video (hide the still poster) only once a real frame has
-        // painted — on iOS a seeked-but-never-played muted video stays blank, so
-        // hiding the still on metadata alone would flash an empty scene.
-        v.addEventListener('seeked', () => { s.el.classList.add('has-clip'); }, { once: true });
-        v.addEventListener('loadeddata', () => { try { v.pause(); } catch (e) {} if (userReady) primeVideo(v); });
-        s.el.appendChild(v); s.video = v; s.hasClip = true;
-      }).catch(() => { s.loading = false; });
+    fetchBlob(url)
+      .then(blob => { s.blob = blob; s.loading = false; attachClip(s, blob); })
+      .catch(() => { s.loading = false; });
   }
 
   function read() {
@@ -341,6 +354,82 @@ function mountScrollWorld(container, config) {
   window.addEventListener('resize', onResize);
   window.addEventListener('orientationchange', layout);
   window.addEventListener('load', layout);
+
+  // ---- boot screen: hold the page until this device's assets are actually local ----
+  // A clip can only scrub from a whole-file blob, so one that's still downloading
+  // would show as a frozen still. The boot screen locks scroll behind a full-screen
+  // loader while every clip + still downloads (byte-accurate progress where the
+  // server sends Content-Length), then lifts to reveal the flight with all clips
+  // attached. The 45s timeout is a safety valve: whatever is still missing falls
+  // back to the lazy per-segment loader (the paw indicator). This runs BEFORE
+  // layout() so read()'s lazy loadClip can't double-fetch what boot is fetching.
+  const bootJobs = [];
+  SEGMENTS.forEach(s => {
+    if (!reduce && s.clip) bootJobs.push({ seg: s, url: (isMobile() && s.clipM) ? s.clipM : s.clip });
+    const poster = (isMobile() && s.stillM) ? s.stillM : s.still;
+    if (poster) bootJobs.push({ url: poster });
+  });
+
+  if (bootJobs.length) {
+    const boot = el('div', 'sw-boot');
+    const bootPaws = el('div', 'sw-boot__paws');
+    for (let k = 0; k < 3; k++) bootPaws.appendChild(el('i'));
+    const bootLabel = el('span', 'sw-boot__label');
+    bootLabel.textContent = config.loaderLabel || 'loading';
+    const bootBar = el('div', 'sw-boot__bar');
+    const bootFill = el('span'); bootBar.appendChild(bootFill);
+    const bootPct = el('span', 'sw-boot__pct'); bootPct.textContent = '0%';
+    boot.appendChild(bootPaws); boot.appendChild(bootLabel);
+    boot.appendChild(bootBar); boot.appendChild(bootPct);
+    container.appendChild(boot);
+
+    // The flight always starts from the top: defeat the browser's scroll
+    // restoration and pin the page while the overlay is up.
+    try { history.scrollRestoration = 'manual'; } catch (e) {}
+    window.scrollTo(0, 0);
+    document.documentElement.classList.add('sw-booting');
+
+    let bootFinished = false, bootPainted = -1;
+    function bootPaint() {
+      let p = 0;
+      bootJobs.forEach(j => p += j.done ? 1 : (j.prog || 0));
+      const pct = Math.round(clamp(p / bootJobs.length) * 100);
+      if (pct !== bootPainted) {
+        bootPainted = pct;
+        bootFill.style.transform = `scaleX(${pct / 100})`;
+        bootPct.textContent = pct + '%';
+      }
+    }
+    function bootDone() {
+      if (bootFinished) return;
+      bootFinished = true;
+      boot.classList.add('is-done');
+      document.documentElement.classList.remove('sw-booting');
+      // Blobs are local now — attach every clip so even a nav-dot jump far down
+      // the page scrubs instantly instead of hitting a not-yet-lazy-loaded still.
+      SEGMENTS.forEach(s => { s.loading = false; if (!s.hasClip) loadClip(s); });
+      read();
+      setTimeout(() => boot.remove(), 700);
+    }
+
+    bootPaint();
+    bootJobs.forEach(j => {
+      if (j.seg) j.seg.loading = true;   // keep read()'s lazy loadClip off this fetch
+      fetchBlob(j.url, f => { j.prog = f; bootPaint(); })
+        .then(blob => {
+          if (j.seg) { j.seg.blob = blob; j.seg.loading = false; if (bootFinished) loadClip(j.seg); }
+          j.done = true; bootPaint();
+          if (bootJobs.every(x => x.done)) bootDone();
+        })
+        .catch(() => {   // a missing asset shouldn't trap the page: count it done,
+          if (j.seg) j.seg.loading = false;   // the still poster + paw loader cover it
+          j.done = true; bootPaint();
+          if (bootJobs.every(x => x.done)) bootDone();
+        });
+    });
+    setTimeout(bootDone, 45000);
+  }
+
   layout();
   requestAnimationFrame(raf);
 
@@ -354,6 +443,27 @@ function mountScrollWorld(container, config) {
     if (cta.secondary) h += `<a class="sw-btn sw-btn--ghost" href="${esc(cta.secondary.href || '#')}">${esc(cta.secondary.label)}</a>`;
     return h;
   }
+}
+
+// fetch → Blob, reporting byte-accurate progress (0..1) when the server exposes
+// Content-Length — static hosts do for mp4/webp. Where the length is unknown or
+// the stream reader is unavailable it degrades to an opaque blob (no progress).
+function fetchBlob(url, onProgress) {
+  return fetch(url).then(r => {
+    if (!r.ok) return Promise.reject(new Error('HTTP ' + r.status));
+    const len = +(r.headers.get('Content-Length') || 0);
+    if (!len || !onProgress || !r.body || !r.body.getReader) return r.blob();
+    const reader = r.body.getReader();
+    const parts = [];
+    let got = 0;
+    const pump = () => reader.read().then(res => {
+      if (res.done) return new Blob(parts);
+      parts.push(res.value); got += res.value.length;
+      onProgress(got / len);
+      return pump();
+    });
+    return pump();
+  });
 }
 
 function seedParticles(host, reduce) {
@@ -432,14 +542,22 @@ function injectCSS() {
   .sw-loader{position:fixed;left:50%;bottom:64px;z-index:30;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s;pointer-events:none;}
   .sw-loader.is-on{opacity:1;visibility:visible;}
   .sw-loader__label{font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--sw-ink-soft);}
-  .sw-loader__paws{display:flex;gap:13px;height:18px;}
-  .sw-loader__paws i{position:relative;width:16px;height:18px;opacity:.22;animation:sw-paw 1.15s ease-in-out infinite;}
-  .sw-loader__paws i:nth-child(2){transform:rotate(10deg);}
-  .sw-loader__paws i:nth-child(3){transform:rotate(-8deg);}
-  .sw-loader__paws i:nth-child(2){animation-delay:.16s;} .sw-loader__paws i:nth-child(3){animation-delay:.32s;}
-  .sw-loader__paws i::before{content:"";position:absolute;left:3px;bottom:1px;width:11px;height:8px;background:var(--sw-accent);border-radius:55% 55% 48% 48%;}
-  .sw-loader__paws i::after{content:"";position:absolute;left:1px;top:0;width:5px;height:5px;background:var(--sw-accent);border-radius:50%;box-shadow:6px -1px 0 var(--sw-accent),12px 0 0 var(--sw-accent);}
+  .sw-loader__paws,.sw-boot__paws{display:flex;gap:13px;height:18px;}
+  .sw-loader__paws i,.sw-boot__paws i{position:relative;width:16px;height:18px;opacity:.22;animation:sw-paw 1.15s ease-in-out infinite;}
+  .sw-loader__paws i:nth-child(2),.sw-boot__paws i:nth-child(2){transform:rotate(10deg);}
+  .sw-loader__paws i:nth-child(3),.sw-boot__paws i:nth-child(3){transform:rotate(-8deg);}
+  .sw-loader__paws i:nth-child(2),.sw-boot__paws i:nth-child(2){animation-delay:.16s;} .sw-loader__paws i:nth-child(3),.sw-boot__paws i:nth-child(3){animation-delay:.32s;}
+  .sw-loader__paws i::before,.sw-boot__paws i::before{content:"";position:absolute;left:3px;bottom:1px;width:11px;height:8px;background:var(--sw-accent);border-radius:55% 55% 48% 48%;}
+  .sw-loader__paws i::after,.sw-boot__paws i::after{content:"";position:absolute;left:1px;top:0;width:5px;height:5px;background:var(--sw-accent);border-radius:50%;box-shadow:6px -1px 0 var(--sw-accent),12px 0 0 var(--sw-accent);}
   @keyframes sw-paw{0%,100%{opacity:.22}35%{opacity:1}}
+  /* Boot screen: covers the page while this device's clips download in full. */
+  .sw-boot{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--sw-bg);touch-action:none;transition:opacity .6s ease,visibility .6s;}
+  .sw-boot.is-done{opacity:0;visibility:hidden;}
+  .sw-boot__label{font-size:.76rem;letter-spacing:.16em;text-transform:uppercase;color:var(--sw-ink-soft);}
+  .sw-boot__bar{width:min(280px,64vw);height:4px;border-radius:999px;overflow:hidden;background:color-mix(in srgb,var(--sw-ink) 10%,transparent);}
+  .sw-boot__bar span{display:block;height:100%;border-radius:inherit;transform-origin:0 50%;transform:scaleX(0);background:var(--sw-accent);transition:transform .25s linear;}
+  .sw-boot__pct{font-family:ui-monospace,Menlo,monospace;font-size:.72rem;letter-spacing:.08em;color:var(--sw-ink-soft);}
+  html.sw-booting,html.sw-booting body{overflow:hidden !important;}
   .sw-track{position:relative;z-index:1;width:100%;pointer-events:none;}
   @media (max-width:860px){
     .sw-nav{display:none;}
@@ -464,7 +582,7 @@ function injectCSS() {
     .sw-route__dot{width:28px;height:28px;}
     .sw-btn{padding:15px 26px;}
   }
-  @media (prefers-reduced-motion:reduce){ .sw-hint i::after{animation:none;} .sw-pt{display:none;} }
+  @media (prefers-reduced-motion:reduce){ .sw-hint i::after{animation:none;} .sw-pt{display:none;} .sw-boot__paws{display:none;} }
   `;
   // Wrap in a cascade layer so the page's own theme tokens (unlayered
   // :root / .sw-root { --sw-bg / --sw-ink / --sw-accent … }) always win over

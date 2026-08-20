@@ -9,8 +9,10 @@ Flow (Veo), dirakit dengan scrub engine vanilla-JS.
 
 - `index.html` — halaman + config section (copy, warna, pacing)
 - `scrub-engine.js` — engine scroll-scrub (dari scroll-world, dengan modifikasi
-  lokal: loading indicator "paw loader" saat klip masih downloading — label
-  via `config.loaderLabel`)
+  lokal: boot screen "paw loader" full-screen dengan progress bar — scroll
+  terkunci sampai semua video + poster terdownload penuh ke local, karena klip
+  baru bisa dianimasikan setelah blob-nya utuh; label via `config.loaderLabel`.
+  Ada safety timeout 45s; sisanya jatuh ke lazy loader per-section)
 - `assets/` — poster webp + video mp4 (desktop & varian mobile)
 - `work/` *(tidak di-push)* — pipeline lokal: prompt, render mentah, frame QA
 
